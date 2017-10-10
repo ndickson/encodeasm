@@ -124,7 +124,7 @@ namespace encoders {
 	/// NOTE: Unordered; opcode determines the operand order.
 	static constexpr Instruction commonEncode(const uint8 opcode, const core::reg8 r, const MemT<1> rm) noexcept {
 		if (rm.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 
 		Instruction i = Instruction(Instruction::zero_init_tag());
@@ -143,12 +143,12 @@ namespace encoders {
 	/// NOTE: This is intentionally *not* constexpr, to produce a compile
 	///       error if hit at compile time.
 	static Instruction error_reg8_32_registers_cant_be_used_with_memory_operand_with_rex() noexcept {
-		return Instruction::create_error("Legacy 8-bit registers, like ah, ch, dh, or bh, can't be used with a memory operand using r8, r9, r10, ..., r15");
+		return Instruction::createError("Legacy 8-bit registers, like ah, ch, dh, or bh, can't be used with a memory operand using r8, r9, r10, ..., r15");
 	}
 	/// NOTE: Unordered; opcode determines the operand order.
 	static constexpr Instruction commonEncode(const uint8 opcode, const core::reg8_32 r, const MemT<1> rm) noexcept {
 		if (rm.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 		if (uint8(r) >= 4 && rm.hasrex) {
 			return error_reg8_32_registers_cant_be_used_with_memory_operand_with_rex();
@@ -177,7 +177,7 @@ namespace encoders {
 	/// NOTE: Unordered; opcode determines the operand order.
 	static constexpr Instruction commonEncode(const uint8 opcode, const core::reg16 r, const MemT<2> rm) noexcept {
 		if (rm.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 
 		Instruction i = Instruction(Instruction::zero_init_tag());
@@ -203,7 +203,7 @@ namespace encoders {
 	/// NOTE: Unordered; opcode determines the operand order.
 	static constexpr Instruction commonEncode(const uint8 opcode, const core::reg32 r, const MemT<4> rm) noexcept {
 		if (rm.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 
 		Instruction i = Instruction(Instruction::zero_init_tag());
@@ -220,7 +220,7 @@ namespace encoders {
 	/// NOTE: Unordered; opcode determines the operand order.
 	static constexpr Instruction commonEncode(const uint8 opcode, const core::reg r, const MemT<8> rm) noexcept {
 		if (rm.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 
 		Instruction i = Instruction(Instruction::zero_init_tag());
@@ -258,7 +258,7 @@ namespace encoders {
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const MemT<1> m,const int8 imm) noexcept {
 		if (m.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 		Instruction i = Instruction(Instruction::zero_init_tag());
 		int index = OpcodeAndMem(i, opcode, m, num);
@@ -268,7 +268,7 @@ namespace encoders {
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const MemT<2> m, const int16 imm) noexcept {
 		if (m.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 		Instruction i = Instruction(Instruction::zero_init_tag());
 		i.bytes[0] = memory::SIZE_PREFIX;
@@ -280,7 +280,7 @@ namespace encoders {
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const MemT<4> m, const int32 imm) noexcept {
 		if (m.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 		Instruction i = Instruction(Instruction::zero_init_tag());
 		int index = OpcodeAndMem(i, opcode, m, num);
@@ -293,7 +293,7 @@ namespace encoders {
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const MemT<8> m, const int32 imm) noexcept {
 		if (m.hasError()) {
-			return Instruction::create_error("Invalid memory operand");
+			return Instruction::createError("Invalid memory operand");
 		}
 		Instruction i = Instruction(Instruction::zero_init_tag());
 		// NOTE: REX.W is already set in m.
@@ -335,7 +335,7 @@ namespace encoders {
 		}
 		static constexpr Instruction encode(const MemT<2> m,const int8 imm) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");;
+				return Instruction::createError("Invalid memory operand");;
 			}
 			Instruction i = Instruction(Instruction::zero_init_tag());
 			i.bytes[0] = memory::SIZE_PREFIX;
@@ -354,7 +354,7 @@ namespace encoders {
 		}
 		static constexpr Instruction encode(const MemT<4> m,const int8 imm) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");;
+				return Instruction::createError("Invalid memory operand");;
 			}
 			Instruction i = Instruction(Instruction::zero_init_tag());
 			int index = OpcodeAndMem(i, 0x83, m, num);
@@ -367,7 +367,7 @@ namespace encoders {
 		}
 		static constexpr Instruction encode(const MemT<8> m,const int8 imm) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");;
+				return Instruction::createError("Invalid memory operand");;
 			}
 			Instruction i = Instruction(Instruction::zero_init_tag());
 			// NOTE: REX.W is already set in m.
@@ -568,7 +568,7 @@ namespace encoders {
 		template<int membytes>
 		static constexpr Instruction encode(const core::reg r, MemT<membytes> m) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");
+				return Instruction::createError("Invalid memory operand");
 			}
 
 			m.hasrex = true;
@@ -583,7 +583,7 @@ namespace encoders {
 		template<int membytes>
 		static constexpr Instruction encode(const core::reg32 r, MemT<membytes> m) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");
+				return Instruction::createError("Invalid memory operand");
 			}
 
 			if (m.hasrex) {
@@ -602,7 +602,7 @@ namespace encoders {
 		template<int membytes>
 		static constexpr Instruction encode(const core::reg16 r, MemT<membytes> m) noexcept {
 			if (m.hasError()) {
-				return Instruction::create_error("Invalid memory operand");
+				return Instruction::createError("Invalid memory operand");
 			}
 
 			if (m.hasrex) {
