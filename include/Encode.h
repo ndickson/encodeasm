@@ -142,7 +142,7 @@ namespace encoders {
 	}
 	/// NOTE: This is intentionally *not* constexpr, to produce a compile
 	///       error if hit at compile time.
-	static Instruction error_reg8_32_registers_cant_be_used_with_memory_operand_with_rex() noexcept {
+	static inline Instruction error_reg8_32_registers_cant_be_used_with_memory_operand_with_rex() noexcept {
 		return Instruction::createError("Legacy 8-bit registers, like ah, ch, dh, or bh, can't be used with a memory operand using r8, r9, r10, ..., r15");
 	}
 	/// NOTE: Unordered; opcode determines the operand order.
