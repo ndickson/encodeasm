@@ -203,7 +203,7 @@ struct alignas(8) MemT {
 		return segment_prefix != NO_SEGMENT_PREFIX;
 	}
 
-	/// Default constructor must be trivial for mem to be a POD type,
+	/// Default constructor must be trivial for MemT to be a POD type,
 	/// and trivial default constructors can't be constexpr if there are
 	/// non-static data members, unfortunately.
 	MemT() = default;
