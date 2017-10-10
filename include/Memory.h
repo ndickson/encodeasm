@@ -346,7 +346,7 @@ struct alignas(8) MemT {
 private:
 	/// NOTE: This is intentionally *not* constexpr, to produce a compile
 	///       error if hit at compile time.
-	void error_rsp_cant_be_memory_index_register_only_base_register() noexcept {
+	inline void error_rsp_cant_be_memory_index_register_only_base_register() noexcept {
 		// This indicates the error at run time.
 		dispbytes = INVALID_DISP_BYTES;
 	}
@@ -528,7 +528,7 @@ public:
 private:
 	/// NOTE: This is intentionally *not* constexpr, to produce a compile
 	///       error if hit at compile time.
-	void error_invalid_index_register_scale_for_memory_operand() noexcept {
+	inline void error_invalid_index_register_scale_for_memory_operand() noexcept {
 		// This indicates the error at run time.
 		dispbytes = INVALID_DISP_BYTES;
 	}
