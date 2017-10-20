@@ -8,6 +8,7 @@
 #include "Types.h"
 #include <initializer_list>
 #include <type_traits>
+#include <cstddef>
 
 namespace encodeasm {
 
@@ -21,8 +22,16 @@ struct alignas(16) Instruction {
 	static constexpr uint8 MAX_LENGTH = 15;
 
 	/// First byte is length of instruction in the rest of the bytes.
-	uint8 length;
-	uint8 bytes[MAX_LENGTH];
+	union {
+		struct {
+			uint8 length;
+			uint8 bytes[MAX_LENGTH];
+		};
+		struct {
+			uint8 padding[1+MAX_LENGTH-sizeof(const char*)];
+			const char *text;
+		} textEncoding;
+	};
 
 	/// Default constructor must be trivial for Instruction to be a POD type,
 	/// and trivial default constructors can't be constexpr if there are
@@ -56,8 +65,8 @@ struct alignas(16) Instruction {
 	struct line_label_init_tag { constexpr line_label_init_tag() = default; };
 	struct error_init_tag { constexpr error_init_tag() = default; };
 
-	/// Use one of this constructors if you need something like a default constructor in constexpr code.
-	/// Zero-length instruction won't be anything, but won't be invalid.
+	/// Use this constructor if you need something like a default constructor in constexpr code.
+	/// The zero-length instruction won't be anything, but won't be invalid.
 	constexpr Instruction(zero_init_tag) noexcept : length(0), bytes() {
 		static_assert(sizeof(Instruction)==16, "The size of Instruction should be 16 bytes, so that it fits in a single SSE register.");
 		static_assert(std::is_pod<Instruction>::value,"Instruction should be a POD (Plain Old Data) type, so that compilers can optimize for it more easily.");
@@ -118,12 +127,12 @@ struct alignas(16) Instruction {
 	static constexpr uint8 ERROR_LENGTH = 0xFF;
 
 private:
-	constexpr const char** getStringPtr() const noexcept {
-		return (const char**)(bytes+MAX_LENGTH-sizeof(const char*));
+	constexpr void setStringPtr(const char*const text_) noexcept {
+		textEncoding.text = text_;
 	}
 public:
 	constexpr Instruction(error_init_tag, const char*const error_message) noexcept : length(ERROR_LENGTH), bytes() {
-		*getStringPtr() = error_message;
+		setStringPtr(error_message);
 	}
 
 	static constexpr Instruction createError(const char*const error_message) noexcept {
@@ -131,26 +140,30 @@ public:
 	}
 
 	constexpr Instruction(line_label_init_tag, const char*const label) noexcept : length(LINE_LABEL_LENGTH),bytes() {
-		*getStringPtr() = label;
+		setStringPtr(label);
 	}
 
-	static constexpr Instruction createLineLabel(const char* label) noexcept {
+	static constexpr Instruction createLineLabel(const char*const label) noexcept {
 		return Instruction(line_label_init_tag(), label);
 	}
 
 	constexpr Instruction(jump_init_tag, const char*const target_label, const uint8 short_opcode, const uint8 near_opcode0, const uint8 near_opcode1=0, const uint8 prefix=0) noexcept :
 		length(JUMP_LENGTH), bytes{prefix,short_opcode,near_opcode0,near_opcode1} {
-		*getStringPtr() = target_label;
+		setStringPtr(target_label);
+	}
+
+	static constexpr Instruction createJump(const char*const target_label, const uint8 short_opcode, const uint8 near_opcode0, const uint8 near_opcode1=0, const uint8 prefix=0) noexcept {
+		return Instruction(jump_init_tag(), target_label, short_opcode, near_opcode0, near_opcode1, prefix);
 	}
 
 	constexpr Instruction(jump_short_init_tag, const char*const target_label, const uint8 short_opcode, const uint8 prefix=0) noexcept :
 		length(JUMP_SHORT_LENGTH), bytes{prefix, short_opcode} {
-		*getStringPtr() = target_label;
+		setStringPtr(target_label);
 	}
 
 	constexpr Instruction(jump_near_init_tag, const char*const target_label, const uint8 near_opcode0, const uint8 near_opcode1=0, const uint8 prefix=0) noexcept :
 		length(JUMP_NEAR_LENGTH), bytes{prefix,0,near_opcode0,near_opcode1} {
-		*getStringPtr() = target_label;
+		setStringPtr(target_label);
 	}
 
 private:
@@ -224,7 +237,7 @@ public:
 		if (length < JUMP_LENGTH) {
 			return error_Instruction_only_has_string_for_jumps_labels_and_errors();
 		}
-		return *getStringPtr();
+		return textEncoding.text;
 	}
 
 	/// NOTE: Caller should already have checked is_valid()
@@ -236,13 +249,26 @@ public:
 	}
 };
 
+/// Use this if you need something like a default-constructed Instruction in constexpr code.
+/// The zero-length instruction won't be anything, but won't be invalid.
+///
+/// Sadly, C++17 doesn't currently provide any way of having this in the scope of Instruction,
+/// because if it's declared and defined inside, the compiler complains that Instruction
+/// is an incomplete type, and if it's declared inside and defined outside, the compiler
+/// complains that static constexpr member variables must be defined in the declaration.
+static constexpr Instruction EMPTY_INSTRUCTION = Instruction(Instruction::zero_init_tag());
+
 /// Line label custom string literal suffix.
 /// This let's you do things like "loop_start"_label to create a line label.
-static constexpr Instruction operator "" _label(const char*const label) {
+static constexpr Instruction operator ""_label(const char* label, const std::size_t length) noexcept {
 	return Instruction::createLineLabel(label);
 }
 
-static constexpr Instruction ALIGN(const uint32 alignment_in_bytes) {
+/// Creates an alignment statement, aligning to the given number of bytes.
+/// If the resulting size is small enough, it will output a NOP instruction,
+/// else if will output a JMP to after the statement, so you DON'T need to
+/// jump over the alignment statement.
+static constexpr Instruction ALIGN(const uint32 alignment_in_bytes) noexcept {
 	return Instruction(Instruction::align_init_tag(), alignment_in_bytes);
 }
 }
