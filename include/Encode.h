@@ -19,6 +19,11 @@ namespace encoders {
 		// REX: 0100WRXB (01000R00)
 		return 0x40 | ((uint8(r)&0b1000)>>1);
 	}
+	template<typename RegType>
+	constexpr uint8 REXB(RegType r) noexcept {
+		// REX: 0100WRXB (0100000B)
+		return 0x40 | ((uint8(r)&0b1000)>>3);
+	}
 	constexpr uint8 REXW() noexcept {
 		// REX: 0100WRXB (0100W000)
 		return 0x48;
@@ -61,6 +66,39 @@ enum class mnemonic : uint32 {
 	XCHG,
 	NEG,
 	NOT,
+
+	JMP,
+
+	JO,
+	JNO,
+	JC,
+	JB = JC,
+	JNAE = JC,
+	JNC,
+	JAE = JNC,
+	JNB = JNC,
+	JZ,
+	JE = JZ,
+	JNZ,
+	JNE = JNZ,
+	JBE,
+	JNA = JBE,
+	JA,
+	JNBE = JA,
+	JS,
+	JNS,
+	JP,
+	JPE = JP,
+	JNP,
+	JPO = JNP,
+	JL,
+	JNGE = JL,
+	JGE,
+	JNL = JGE,
+	JLE,
+	JNG = JLE,
+	JG,
+	JNLE = JG,
 
 	CALL,
 	RET
@@ -127,7 +165,7 @@ namespace encoders {
 			return Instruction::createError("Invalid memory operand");
 		}
 
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		if (uint8(r) < 4 || uint8(r) >= 8 || rm.hasrex) {
 			// No REX needed if al, cl, dl, or bl and !rm.hasrex,
 			// and if rm.hasrex or r8b+, it handles the REX byte automatically.
@@ -154,7 +192,7 @@ namespace encoders {
 			return error_reg8_32_registers_cant_be_used_with_memory_operand_with_rex();
 		}
 
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		// No REX in this case (al, cl, dl, or bl, ah, ch, dh, or bh).
 		// REX from memory operand allowed if al, cl, dl, or bl.
 		i.length = OpcodeAndMem(i, opcode, rm, r);
@@ -180,7 +218,7 @@ namespace encoders {
 			return Instruction::createError("Invalid memory operand");
 		}
 
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		i.bytes[0] = memory::SIZE_PREFIX;
 		// REX is handled automatically, if needed.
 		i.length = OpcodeAndMem(i, opcode, rm, r, 1);
@@ -206,7 +244,7 @@ namespace encoders {
 			return Instruction::createError("Invalid memory operand");
 		}
 
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		// REX is handled automatically, if needed.
 		i.length = OpcodeAndMem(i, opcode, rm, r);
 		return i;
@@ -223,7 +261,7 @@ namespace encoders {
 			return Instruction::createError("Invalid memory operand");
 		}
 
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		// REX is handled automatically, including W from rm.
 		i.length = OpcodeAndMem(i, opcode, rm, r);
 		return i;
@@ -235,7 +273,7 @@ namespace encoders {
 		}
 		// REX is needed for spl, bpl, sil, dil,
 		// r8b, r9b, r10b, r11b, ...
-		return Instruction(REXR(r), opcode, ModRegRm(num,r), imm);
+		return Instruction(REXB(r), opcode, ModRegRm(num,r), imm);
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const core::reg16 r, const int16 imm) noexcept {
 		if (uint8(r) < 8) {
@@ -243,7 +281,7 @@ namespace encoders {
 			return Instruction(memory::SIZE_PREFIX, opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8));
 		}
 		// REX is needed for r8w, r9w, r10w, r11w, ...
-		return Instruction(memory::SIZE_PREFIX, REXR(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8));
+		return Instruction(memory::SIZE_PREFIX, REXB(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8));
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const core::reg32 r, const int32 imm) noexcept {
 		if (uint8(r) < 8) {
@@ -251,7 +289,7 @@ namespace encoders {
 			return Instruction(opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 		}
 		// REX is needed for r8d, r9d, r10d, r11d, ...
-		return Instruction(REXR(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
+		return Instruction(REXB(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const core::reg r, const int32 imm) noexcept {
 		return Instruction(REXWR(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
@@ -260,7 +298,7 @@ namespace encoders {
 		if (m.hasError()) {
 			return Instruction::createError("Invalid memory operand");
 		}
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		int index = OpcodeAndMem(i, opcode, m, num);
 		i.bytes[index] = imm;
 		i.length = index+1;
@@ -270,7 +308,7 @@ namespace encoders {
 		if (m.hasError()) {
 			return Instruction::createError("Invalid memory operand");
 		}
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		i.bytes[0] = memory::SIZE_PREFIX;
 		int index = OpcodeAndMem(i, opcode, m, num, 1);
 		i.bytes[index] = uint8(imm);
@@ -282,7 +320,7 @@ namespace encoders {
 		if (m.hasError()) {
 			return Instruction::createError("Invalid memory operand");
 		}
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		int index = OpcodeAndMem(i, opcode, m, num);
 		i.bytes[index] = uint8(imm);
 		i.bytes[index+1] = uint8(imm>>8);
@@ -295,7 +333,7 @@ namespace encoders {
 		if (m.hasError()) {
 			return Instruction::createError("Invalid memory operand");
 		}
-		Instruction i = Instruction(Instruction::zero_init_tag());
+		Instruction i = EMPTY_INSTRUCTION;
 		// NOTE: REX.W is already set in m.
 		int index = OpcodeAndMem(i, opcode, m, num);
 		i.bytes[index] = uint8(imm);
@@ -331,13 +369,13 @@ namespace encoders {
 				return Instruction(memory::SIZE_PREFIX, 0x83, ModRegRm(num,r), imm);
 			}
 			// REX is needed for r8w, r9w, r10w, r11w, ...
-			return Instruction(memory::SIZE_PREFIX, REXR(r), 0x83, ModRegRm(num,r), imm);
+			return Instruction(memory::SIZE_PREFIX, REXB(r), 0x83, ModRegRm(num,r), imm);
 		}
 		static constexpr Instruction encode(const MemT<2> m,const int8 imm) noexcept {
 			if (m.hasError()) {
 				return Instruction::createError("Invalid memory operand");;
 			}
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			i.bytes[0] = memory::SIZE_PREFIX;
 			int index = OpcodeAndMem(i, 0x83, m, num, 1);
 			i.bytes[index] = imm;
@@ -350,13 +388,13 @@ namespace encoders {
 				return Instruction(0x83, ModRegRm(num,r), imm);
 			}
 			// REX is needed for r8d, r9d, r10d, r11d, ...
-			return Instruction(REXR(r), 0x83, ModRegRm(num,r), imm);
+			return Instruction(REXB(r), 0x83, ModRegRm(num,r), imm);
 		}
 		static constexpr Instruction encode(const MemT<4> m,const int8 imm) noexcept {
 			if (m.hasError()) {
 				return Instruction::createError("Invalid memory operand");;
 			}
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			int index = OpcodeAndMem(i, 0x83, m, num);
 			i.bytes[index] = imm;
 			i.length = index+1;
@@ -369,7 +407,7 @@ namespace encoders {
 			if (m.hasError()) {
 				return Instruction::createError("Invalid memory operand");;
 			}
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			// NOTE: REX.W is already set in m.
 			int index = OpcodeAndMem(i, 0x83, m, num);
 			i.bytes[index] = imm;
@@ -510,7 +548,7 @@ namespace encoders {
 				}
 				// REX is needed for spl, bpl, sil, dil,
 				// r8b, r9b, r10b, r11b, ...
-				return Instruction(REXR(r), 0xB0 | (uint8(r)&0b111), imm);
+				return Instruction(REXB(r), 0xB0 | (uint8(r)&0b111), imm);
 			}
 			return commonEncode(0xC6, 0, r, imm);
 		}
@@ -528,18 +566,18 @@ namespace encoders {
 					return Instruction(memory::SIZE_PREFIX, 0xB8 | uint8(r), uint8(imm), uint8(imm>>8));
 				}
 				// REX is needed for r8w, r9w, r10w, r11w, ...
-				return Instruction(memory::SIZE_PREFIX, REXR(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8));
+				return Instruction(memory::SIZE_PREFIX, REXB(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8));
 			}
 			return commonEncode(0xC7, 0, r, imm);
 		}
 		static constexpr Instruction encode(const core::reg32 r, const int32 imm, const bool alternate_encoding=false) noexcept {
 			if (!alternate_encoding) {
 				if (uint8(r) < 8) {
-					// No REX needed if ax, cx, dx, bx, sp, bp, si, or di.
+					// No REX needed if eax, ecx, edx, ebx, esp, ebp, esi, or edi.
 					return Instruction(0xB8 | uint8(r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 				}
-				// REX is needed for r8w, r9w, r10w, r11w, ...
-				return Instruction(REXR(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
+				// REX is needed for r8d, r9d, r10d, r11d, ...
+				return Instruction(REXB(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 			}
 			return commonEncode(0xC7, 0, r, imm);
 		}
@@ -575,7 +613,7 @@ namespace encoders {
 			// Add W bit, since membytes doesn't matter; the register size is what counts in this case.
 			m.rex |= 0x48;
 
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			// REX is handled automatically, including W from rm.
 			i.length = OpcodeAndMem(i, opcode, m, r);
 			return i;
@@ -594,7 +632,7 @@ namespace encoders {
 				}
 			}
 
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			// REX is handled automatically, including W from rm.
 			i.length = OpcodeAndMem(i, opcode, m, r);
 			return i;
@@ -613,11 +651,85 @@ namespace encoders {
 				}
 			}
 
-			Instruction i = Instruction(Instruction::zero_init_tag());
+			Instruction i = EMPTY_INSTRUCTION;
 			i.bytes[0] = memory::SIZE_PREFIX;
 			// REX is handled automatically, including W from rm.
 			i.length = OpcodeAndMem(i, opcode, m, r, 1);
 			return i;
+		}
+	};
+
+	struct jmp_encoder {
+		static constexpr Instruction encode(const char*const target_label) noexcept {
+			return Instruction::createJump(target_label, 0xEB, 0xE9);
+		}
+		static constexpr Instruction encode(const core::reg rm) noexcept {
+			if (uint8(rm) & 0b1000) {
+				return Instruction(0xFF, ModRegRm(4,rm));
+			}
+			return Instruction(REXB(rm), 0xFF, ModRegRm(4,rm));
+		}
+		static constexpr Instruction encode(MemT<8> rm) noexcept {
+			// REX byte is optional in this case, and doesn't need W set.
+			if (rm.rex == 0x48) {
+				rm.hasrex = false;
+			}
+			// Clear W bit
+			rm.rex &= ~0b1000;
+
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, from rm.
+			i.length = OpcodeAndMem(i, 0xFF, rm, 4);
+			return i;
+		}
+	};
+
+	enum class flags_condition : uint8 {
+		overflow = 0,   // NOTE: This has to be lowercase because of a define in the Visual C++ headers.
+		no_overflow = 1,
+		carry = 2,
+		below = 2,
+		not_above_or_equal = 2,
+		no_carry = 3,
+		above_or_equal = 3,
+		not_below = 3,
+		zero = 4,
+		equal = 4,
+		not_zero = 5,
+		not_equal = 5,
+		below_or_equal = 6,
+		not_above = 6,
+		above = 7,
+		not_below_or_equal = 7,
+		sign = 8,
+		no_sign = 9,
+		parity = 10,
+		parity_even = 10,
+		no_parity = 11,
+		parity_odd = 11,
+		less = 12,
+		not_greater_or_equal = 12,
+		greater_or_equal = 13,
+		not_less = 13,
+		less_or_equal = 14,
+		not_greater = 14,
+		greater = 15,
+		not_less_or_equal = 15
+	};
+
+	template<flags_condition num>
+	struct jcc_encoder {
+		static constexpr uint8 short_opcode = 0x70+uint8(num);
+		static constexpr uint8 near_opcode = 0x80+uint8(num);
+
+		static constexpr Instruction encode(const char*const target_label) noexcept {
+			return Instruction::createJump(target_label, short_opcode, 0x0F, near_opcode);
+		}
+		static constexpr Instruction encodeLikely(const char*const target_label) noexcept {
+			return Instruction::createJump(target_label, short_opcode, 0x0F, near_opcode, 0x3E);
+		}
+		static constexpr Instruction encodeUnlikely(const char*const target_label) noexcept {
+			return Instruction::createJump(target_label, short_opcode, 0x0F, near_opcode, 0x2E);
 		}
 	};
 }
@@ -633,6 +745,23 @@ template<> struct encoder<mnemonic::XOR> : public encoders::standard_encoder<6> 
 template<> struct encoder<mnemonic::CMP> : public encoders::standard_encoder<7> {};
 template<> struct encoder<mnemonic::MOV> : public encoders::mov_encoder {};
 template<> struct encoder<mnemonic::LEA> : public encoders::lea_encoder {};
+template<> struct encoder<mnemonic::JMP> : public encoders::jmp_encoder {};
+template<> struct encoder<mnemonic::JO> : public encoders::jcc_encoder<encoders::flags_condition::overflow> {};
+template<> struct encoder<mnemonic::JNO> : public encoders::jcc_encoder<encoders::flags_condition::no_overflow> {};
+template<> struct encoder<mnemonic::JB> : public encoders::jcc_encoder<encoders::flags_condition::below> {};
+template<> struct encoder<mnemonic::JAE> : public encoders::jcc_encoder<encoders::flags_condition::above_or_equal> {};
+template<> struct encoder<mnemonic::JZ> : public encoders::jcc_encoder<encoders::flags_condition::zero> {};
+template<> struct encoder<mnemonic::JNZ> : public encoders::jcc_encoder<encoders::flags_condition::not_zero> {};
+template<> struct encoder<mnemonic::JBE> : public encoders::jcc_encoder<encoders::flags_condition::below_or_equal> {};
+template<> struct encoder<mnemonic::JA> : public encoders::jcc_encoder<encoders::flags_condition::above> {};
+template<> struct encoder<mnemonic::JS> : public encoders::jcc_encoder<encoders::flags_condition::sign> {};
+template<> struct encoder<mnemonic::JNS> : public encoders::jcc_encoder<encoders::flags_condition::no_sign> {};
+template<> struct encoder<mnemonic::JP> : public encoders::jcc_encoder<encoders::flags_condition::parity> {};
+template<> struct encoder<mnemonic::JNP> : public encoders::jcc_encoder<encoders::flags_condition::no_parity> {};
+template<> struct encoder<mnemonic::JL> : public encoders::jcc_encoder<encoders::flags_condition::less> {};
+template<> struct encoder<mnemonic::JGE> : public encoders::jcc_encoder<encoders::flags_condition::greater_or_equal> {};
+template<> struct encoder<mnemonic::JLE> : public encoders::jcc_encoder<encoders::flags_condition::less_or_equal> {};
+template<> struct encoder<mnemonic::JG> : public encoders::jcc_encoder<encoders::flags_condition::greater> {};
 
 namespace core {
 #define ENCODEASM_STANDARD_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
@@ -845,6 +974,61 @@ namespace core {
 	constexpr Instruction operator%=(const core::reg destination, memory::register_scaled_register_plus source) {
 		return encoder<mnemonic::LEA>::encode(destination, Mem(source));
 	}
+
+	constexpr Instruction JMP(const char*const target_label) noexcept {
+		return encoder<mnemonic::JMP>::encode(target_label);
+	}
+	constexpr Instruction JMP(const core::reg r) noexcept {
+		return encoder<mnemonic::JMP>::encode(r);
+	}
+	constexpr Instruction JMP(const MemT<8> m) noexcept {
+		return encoder<mnemonic::JMP>::encode(m);
+	}
+
+#define ENCODEASM_JCC_ENCODING_WRAPPER(CONDITION) \
+	constexpr Instruction J##CONDITION(const char*const target_label) noexcept { \
+		return encoder<mnemonic::J##CONDITION>::encode(target_label); \
+	} \
+	constexpr Instruction J##CONDITION##_LIKELY(const char*const target_label) noexcept { \
+		return encoder<mnemonic::J##CONDITION>::encodeLikely(target_label); \
+	} \
+	constexpr Instruction J##CONDITION##_UNLIKELY(const char*const target_label) noexcept { \
+		return encoder<mnemonic::J##CONDITION>::encodeUnlikely(target_label); \
+	} \
+	// End of ENCODEASM_JCC_ENCODING_WRAPPER macro
+
+	ENCODEASM_JCC_ENCODING_WRAPPER(O)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NO)
+	ENCODEASM_JCC_ENCODING_WRAPPER(C)
+	ENCODEASM_JCC_ENCODING_WRAPPER(B)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NAE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NC)
+	ENCODEASM_JCC_ENCODING_WRAPPER(AE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NB)
+	ENCODEASM_JCC_ENCODING_WRAPPER(Z)
+	ENCODEASM_JCC_ENCODING_WRAPPER(E)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NZ)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(BE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NA)
+	ENCODEASM_JCC_ENCODING_WRAPPER(A)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NBE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(S)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NS)
+	ENCODEASM_JCC_ENCODING_WRAPPER(P)
+	ENCODEASM_JCC_ENCODING_WRAPPER(PE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NP)
+	ENCODEASM_JCC_ENCODING_WRAPPER(PO)
+	ENCODEASM_JCC_ENCODING_WRAPPER(L)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NGE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(GE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NL)
+	ENCODEASM_JCC_ENCODING_WRAPPER(LE)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NG)
+	ENCODEASM_JCC_ENCODING_WRAPPER(G)
+	ENCODEASM_JCC_ENCODING_WRAPPER(NLE)
+#undef ENCODEASM_JCC_ENCODING_WRAPPER
+
 }
 
 } // namespace mode64bit
