@@ -50,6 +50,39 @@ namespace encoders {
 	}
 }
 
+#define ENCODEASM_CONDITIONAL_ENUM_WRAPPER(MNEMONIC_PREFIX) \
+	MNEMONIC_PREFIX ## O, \
+	MNEMONIC_PREFIX ## NO, \
+	MNEMONIC_PREFIX ## C, \
+	MNEMONIC_PREFIX ## B = MNEMONIC_PREFIX ## C, \
+	MNEMONIC_PREFIX ## NAE = MNEMONIC_PREFIX ## C, \
+	MNEMONIC_PREFIX ## NC, \
+	MNEMONIC_PREFIX ## AE = MNEMONIC_PREFIX ## NC, \
+	MNEMONIC_PREFIX ## NB = MNEMONIC_PREFIX ## NC, \
+	MNEMONIC_PREFIX ## Z, \
+	MNEMONIC_PREFIX ## E = MNEMONIC_PREFIX ## Z, \
+	MNEMONIC_PREFIX ## NZ, \
+	MNEMONIC_PREFIX ## NE = MNEMONIC_PREFIX ## NZ, \
+	MNEMONIC_PREFIX ## BE, \
+	MNEMONIC_PREFIX ## NA = MNEMONIC_PREFIX ## BE, \
+	MNEMONIC_PREFIX ## A, \
+	MNEMONIC_PREFIX ## NBE = MNEMONIC_PREFIX ## A, \
+	MNEMONIC_PREFIX ## S, \
+	MNEMONIC_PREFIX ## NS, \
+	MNEMONIC_PREFIX ## P, \
+	MNEMONIC_PREFIX ## PE = MNEMONIC_PREFIX ## P, \
+	MNEMONIC_PREFIX ## NP, \
+	MNEMONIC_PREFIX ## PO = MNEMONIC_PREFIX ## NP, \
+	MNEMONIC_PREFIX ## L, \
+	MNEMONIC_PREFIX ## NGE = MNEMONIC_PREFIX ## L, \
+	MNEMONIC_PREFIX ## GE, \
+	MNEMONIC_PREFIX ## NL = MNEMONIC_PREFIX ## GE, \
+	MNEMONIC_PREFIX ## LE, \
+	MNEMONIC_PREFIX ## NG = MNEMONIC_PREFIX ## LE, \
+	MNEMONIC_PREFIX ## G, \
+	MNEMONIC_PREFIX ## NLE = MNEMONIC_PREFIX ## G, \
+	// End of ENCODEASM_CONDITIONAL_ENUM_WRAPPER macro
+
 enum class mnemonic : uint32 {
 	ADD,
 	OR,  // NOTE: Can't be lowercase, because "or" is a C++ keyword.
@@ -69,45 +102,19 @@ enum class mnemonic : uint32 {
 
 	JMP,
 
-	JO,
-	JNO,
-	JC,
-	JB = JC,
-	JNAE = JC,
-	JNC,
-	JAE = JNC,
-	JNB = JNC,
-	JZ,
-	JE = JZ,
-	JNZ,
-	JNE = JNZ,
-	JBE,
-	JNA = JBE,
-	JA,
-	JNBE = JA,
-	JS,
-	JNS,
-	JP,
-	JPE = JP,
-	JNP,
-	JPO = JNP,
-	JL,
-	JNGE = JL,
-	JGE,
-	JNL = JGE,
-	JLE,
-	JNG = JLE,
-	JG,
-	JNLE = JG,
+	ENCODEASM_CONDITIONAL_ENUM_WRAPPER(J)
+	ENCODEASM_CONDITIONAL_ENUM_WRAPPER(SET)
+	ENCODEASM_CONDITIONAL_ENUM_WRAPPER(CMOV)
 
 	CALL,
 	RET
 };
 
+#undef ENCODEASM_CONDITIONAL_ENUM_WRAPPER
+
 namespace encoders {
 	template<int membytes,typename RegType>
-	static constexpr int OpcodeAndMem(Instruction &i, uint8 opcode, MemT<membytes> m, RegType r, int start=0) noexcept {
-		int index = start;
+	static constexpr int OpcodeAndMemStart(Instruction &i, MemT<membytes> m, RegType r, int index) noexcept {
 		if (m.hasSegmentPrefix()) {
 			i.bytes[index] = memory::os::getSegmentPrefix(m.segment_prefix);
 			++index;
@@ -118,9 +125,12 @@ namespace encoders {
 			i.bytes[index] = m.rex | (rbit3>>1);
 			++index;
 		}
-		i.bytes[index] = opcode;
-		i.bytes[index+1] = m.modregrm | ((uint8(r)&0b111)<<3);
-		index += 2;
+		return index;
+	}
+	template<int membytes,typename RegType>
+	static constexpr int OpcodeAndMemEnd(Instruction &i, MemT<membytes> m, RegType r, int index) noexcept {
+		i.bytes[index] = m.modregrm | ((uint8(r)&0b111)<<3);
+		++index;
 		if (m.hassib) {
 			i.bytes[index] = m.sib;
 			++index;
@@ -136,6 +146,19 @@ namespace encoders {
 			index += m.dispbytes;
 		}
 		return index;
+	}
+	template<int membytes,typename RegType>
+	static constexpr int OpcodeAndMem(Instruction &i, uint8 opcode, MemT<membytes> m, RegType r, int start=0) noexcept {
+		int index = OpcodeAndMemStart(i, m, r, start);
+		i.bytes[index] = opcode;
+		return OpcodeAndMemEnd(i, m, r, index+1);
+	}
+	template<int membytes,typename RegType>
+	static constexpr int OpcodeAndMem(Instruction &i, uint8 opcode0, uint8 opcode1, MemT<membytes> m, RegType r, int start=0) noexcept {
+		int index = OpcodeAndMemStart(i, m, r, start);
+		i.bytes[index] = opcode0;
+		i.bytes[index+1] = opcode1;
+		return OpcodeAndMemEnd(i, m, r, index+2);
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode_base, const core::reg8 r, const core::reg8 rm, bool alternate_encoding=false) noexcept {
 		if (uint8(r) < 4 && uint8(rm)<4) {
@@ -732,6 +755,90 @@ namespace encoders {
 			return Instruction::createJump(target_label, short_opcode, 0x0F, near_opcode, 0x2E);
 		}
 	};
+
+	template<flags_condition num>
+	struct setcc_encoder {
+		static constexpr uint8 opcode0 = 0x0F;
+		static constexpr uint8 opcode1 = 0x90+uint8(num);
+
+		static constexpr Instruction encode(const core::reg8 r) noexcept {
+			if (uint8(r) < 4) {
+				// No REX needed if al, cl, dl, or bl.
+				return Instruction(opcode0, opcode1, ModRegRm(0,r));
+			}
+			// REX is needed for spl, bpl, sil, dil,
+			// r8b, r9b, r10b, r11b, ...
+			return Instruction(REXB(r), opcode0, opcode1, ModRegRm(0,r));
+		}
+		static constexpr Instruction encode(const core::reg8_32 r) noexcept {
+			return Instruction(opcode0, opcode1, ModRegRm(0,r));
+		}
+		static constexpr Instruction encode(const MemT<1> m) noexcept {
+			if (m.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			i.length = OpcodeAndMem(i, opcode0, opcode1, m, 0);
+			return i;
+		}
+	};
+
+	template<flags_condition num>
+	struct cmovcc_encoder {
+		static constexpr uint8 opcode0 = 0x0F;
+		static constexpr uint8 opcode1 = 0x40+uint8(num);
+
+		static constexpr Instruction encode(const core::reg16 r, const core::reg16 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both ax, cx, dx, bx, sp, bp, si, or di.
+				return Instruction(memory::SIZE_PREFIX, opcode0, opcode1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8w, r9w, r10w, r11w, ...
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode0, opcode1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg16 r, const MemT<2> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+
+			Instruction i = EMPTY_INSTRUCTION;
+			i.bytes[0] = memory::SIZE_PREFIX;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r, 1);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg32 r, const core::reg32 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both eax, ecx, edx, ebx, esp, ebp, esi, or edi.
+				return Instruction(opcode0, opcode1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8d, r9d, r10d, r11d, ...
+			return Instruction(REXRB(r,rm), opcode0, opcode1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg32 r, const MemT<4> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg r, const core::reg rm) noexcept {
+			return Instruction(REXWRB(rm,r), opcode0, opcode1, ModRegRm(rm,r));
+		}
+		static constexpr Instruction encode(const core::reg r, const MemT<8> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, including W from rm.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r);
+			return i;
+		}
+	};
 }
 
 template<mnemonic> struct encoder {};
@@ -746,22 +853,31 @@ template<> struct encoder<mnemonic::CMP> : public encoders::standard_encoder<7> 
 template<> struct encoder<mnemonic::MOV> : public encoders::mov_encoder {};
 template<> struct encoder<mnemonic::LEA> : public encoders::lea_encoder {};
 template<> struct encoder<mnemonic::JMP> : public encoders::jmp_encoder {};
-template<> struct encoder<mnemonic::JO> : public encoders::jcc_encoder<encoders::flags_condition::overflow> {};
-template<> struct encoder<mnemonic::JNO> : public encoders::jcc_encoder<encoders::flags_condition::no_overflow> {};
-template<> struct encoder<mnemonic::JB> : public encoders::jcc_encoder<encoders::flags_condition::below> {};
-template<> struct encoder<mnemonic::JAE> : public encoders::jcc_encoder<encoders::flags_condition::above_or_equal> {};
-template<> struct encoder<mnemonic::JZ> : public encoders::jcc_encoder<encoders::flags_condition::zero> {};
-template<> struct encoder<mnemonic::JNZ> : public encoders::jcc_encoder<encoders::flags_condition::not_zero> {};
-template<> struct encoder<mnemonic::JBE> : public encoders::jcc_encoder<encoders::flags_condition::below_or_equal> {};
-template<> struct encoder<mnemonic::JA> : public encoders::jcc_encoder<encoders::flags_condition::above> {};
-template<> struct encoder<mnemonic::JS> : public encoders::jcc_encoder<encoders::flags_condition::sign> {};
-template<> struct encoder<mnemonic::JNS> : public encoders::jcc_encoder<encoders::flags_condition::no_sign> {};
-template<> struct encoder<mnemonic::JP> : public encoders::jcc_encoder<encoders::flags_condition::parity> {};
-template<> struct encoder<mnemonic::JNP> : public encoders::jcc_encoder<encoders::flags_condition::no_parity> {};
-template<> struct encoder<mnemonic::JL> : public encoders::jcc_encoder<encoders::flags_condition::less> {};
-template<> struct encoder<mnemonic::JGE> : public encoders::jcc_encoder<encoders::flags_condition::greater_or_equal> {};
-template<> struct encoder<mnemonic::JLE> : public encoders::jcc_encoder<encoders::flags_condition::less_or_equal> {};
-template<> struct encoder<mnemonic::JG> : public encoders::jcc_encoder<encoders::flags_condition::greater> {};
+
+#define ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(MNEMONIC_PREFIX, MNEMONIC_PREFIX_LOWER) \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## O> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::overflow> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## NO> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::no_overflow> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## B> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::below> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## AE> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::above_or_equal> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## Z> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::zero> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## NZ> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::not_zero> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## BE> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::below_or_equal> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## A> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::above> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## S> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::sign> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## NS> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::no_sign> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## P> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::parity> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## NP> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::no_parity> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## L> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::less> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## GE> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::greater_or_equal> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## LE> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::less_or_equal> {}; \
+	template<> struct encoder<mnemonic::MNEMONIC_PREFIX ## G> : public encoders::MNEMONIC_PREFIX_LOWER ## cc_encoder<encoders::flags_condition::greater> {}; \
+	//ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION
+
+ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(J, j)
+ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(SET, set)
+ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(CMOV, cmov)
+
+#undef ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION
 
 namespace core {
 #define ENCODEASM_STANDARD_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
@@ -985,6 +1101,39 @@ namespace core {
 		return encoder<mnemonic::JMP>::encode(m);
 	}
 
+#define ENCODEASM_CONDITIONAL_ENCODING_WRAPPER(INSTRUCTION_MACRO) \
+	INSTRUCTION_MACRO(O) \
+	INSTRUCTION_MACRO(NO) \
+	INSTRUCTION_MACRO(C) \
+	INSTRUCTION_MACRO(B) \
+	INSTRUCTION_MACRO(NAE) \
+	INSTRUCTION_MACRO(NC) \
+	INSTRUCTION_MACRO(AE) \
+	INSTRUCTION_MACRO(NB) \
+	INSTRUCTION_MACRO(Z) \
+	INSTRUCTION_MACRO(E) \
+	INSTRUCTION_MACRO(NZ) \
+	INSTRUCTION_MACRO(NE) \
+	INSTRUCTION_MACRO(BE) \
+	INSTRUCTION_MACRO(NA) \
+	INSTRUCTION_MACRO(A) \
+	INSTRUCTION_MACRO(NBE) \
+	INSTRUCTION_MACRO(S) \
+	INSTRUCTION_MACRO(NS) \
+	INSTRUCTION_MACRO(P) \
+	INSTRUCTION_MACRO(PE) \
+	INSTRUCTION_MACRO(NP) \
+	INSTRUCTION_MACRO(PO) \
+	INSTRUCTION_MACRO(L) \
+	INSTRUCTION_MACRO(NGE) \
+	INSTRUCTION_MACRO(GE) \
+	INSTRUCTION_MACRO(NL) \
+	INSTRUCTION_MACRO(LE) \
+	INSTRUCTION_MACRO(NG) \
+	INSTRUCTION_MACRO(G) \
+	INSTRUCTION_MACRO(NLE) \
+	// End of ENCODEASM_CONDITIONAL_ENCODING_WRAPPER macro
+
 #define ENCODEASM_JCC_ENCODING_WRAPPER(CONDITION) \
 	constexpr Instruction J##CONDITION(const char*const target_label) noexcept { \
 		return encoder<mnemonic::J##CONDITION>::encode(target_label); \
@@ -997,37 +1146,48 @@ namespace core {
 	} \
 	// End of ENCODEASM_JCC_ENCODING_WRAPPER macro
 
-	ENCODEASM_JCC_ENCODING_WRAPPER(O)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NO)
-	ENCODEASM_JCC_ENCODING_WRAPPER(C)
-	ENCODEASM_JCC_ENCODING_WRAPPER(B)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NAE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NC)
-	ENCODEASM_JCC_ENCODING_WRAPPER(AE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NB)
-	ENCODEASM_JCC_ENCODING_WRAPPER(Z)
-	ENCODEASM_JCC_ENCODING_WRAPPER(E)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NZ)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(BE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NA)
-	ENCODEASM_JCC_ENCODING_WRAPPER(A)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NBE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(S)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NS)
-	ENCODEASM_JCC_ENCODING_WRAPPER(P)
-	ENCODEASM_JCC_ENCODING_WRAPPER(PE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NP)
-	ENCODEASM_JCC_ENCODING_WRAPPER(PO)
-	ENCODEASM_JCC_ENCODING_WRAPPER(L)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NGE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(GE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NL)
-	ENCODEASM_JCC_ENCODING_WRAPPER(LE)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NG)
-	ENCODEASM_JCC_ENCODING_WRAPPER(G)
-	ENCODEASM_JCC_ENCODING_WRAPPER(NLE)
+	ENCODEASM_CONDITIONAL_ENCODING_WRAPPER(ENCODEASM_JCC_ENCODING_WRAPPER)
 #undef ENCODEASM_JCC_ENCODING_WRAPPER
+
+#define ENCODEASM_SETCC_ENCODING_WRAPPER(CONDITION) \
+	constexpr Instruction SET##CONDITION(const core::reg8 r) noexcept { \
+		return encoder<mnemonic::SET##CONDITION>::encode(r); \
+	} \
+	constexpr Instruction SET##CONDITION(const core::reg8_32 r) noexcept { \
+		return encoder<mnemonic::SET##CONDITION>::encode(r); \
+	} \
+	constexpr Instruction SET##CONDITION(const MemT<1> m) noexcept { \
+		return encoder<mnemonic::SET##CONDITION>::encode(m); \
+	} \
+	// End of ENCODEASM_SETCC_ENCODING_WRAPPER macro
+
+	ENCODEASM_CONDITIONAL_ENCODING_WRAPPER(ENCODEASM_SETCC_ENCODING_WRAPPER)
+#undef ENCODEASM_SETCC_ENCODING_WRAPPER
+
+#define ENCODEASM_CMOVCC_ENCODING_WRAPPER(CONDITION) \
+	constexpr Instruction CMOV##CONDITION(const core::reg16 r, const core::reg16 rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	constexpr Instruction CMOV##CONDITION(const core::reg16 r, const MemT<2> rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	constexpr Instruction CMOV##CONDITION(const core::reg32 r, const core::reg32 rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	constexpr Instruction CMOV##CONDITION(const core::reg32 r, const MemT<4> rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	constexpr Instruction CMOV##CONDITION(const core::reg r, const core::reg rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	constexpr Instruction CMOV##CONDITION(const core::reg r, const MemT<8> rm) noexcept { \
+		return encoder<mnemonic::CMOV##CONDITION>::encode(r,rm); \
+	} \
+	// End of ENCODEASM_CMOVCC_ENCODING_WRAPPER macro
+
+	ENCODEASM_CONDITIONAL_ENCODING_WRAPPER(ENCODEASM_CMOVCC_ENCODING_WRAPPER)
+#undef ENCODEASM_CMOVCC_ENCODING_WRAPPER
+#undef ENCODEASM_CONDITIONAL_ENCODING_WRAPPER
 
 }
 
