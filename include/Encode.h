@@ -29,9 +29,9 @@ namespace encoders {
 		return 0x48;
 	}
 	template<typename RegType>
-	constexpr uint8 REXWR(RegType r) noexcept {
-		// REX: 0100WRXB (0100WR00)
-		return 0x48 | ((uint8(r)&0b1000)>>1);
+	constexpr uint8 REXWB(RegType r) noexcept {
+		// REX: 0100WRXB (0100W00B)
+		return 0x48 | ((uint8(r)&0b1000)>>3);
 	}
 	template<typename RegType0,typename RegType1>
 	constexpr uint8 REXRB(RegType0 r, RegType1 b) noexcept {
@@ -315,7 +315,7 @@ namespace encoders {
 		return Instruction(REXB(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const core::reg r, const int32 imm) noexcept {
-		return Instruction(REXWR(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
+		return Instruction(REXWB(r), opcode, ModRegRm(num,r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
 	}
 	static constexpr Instruction commonEncode(const uint8 opcode, const uint8 num, const MemT<1> m,const int8 imm) noexcept {
 		if (m.hasError()) {
@@ -424,7 +424,7 @@ namespace encoders {
 			return i;
 		}
 		static constexpr Instruction encode(const core::reg r, const int8 imm) noexcept {
-			return Instruction(REXWR(r), 0x83, ModRegRm(num,r), uint8(imm));
+			return Instruction(REXWB(r), 0x83, ModRegRm(num,r), uint8(imm));
 		}
 		static constexpr Instruction encode(const MemT<8> m,const int8 imm) noexcept {
 			if (m.hasError()) {
@@ -608,7 +608,7 @@ namespace encoders {
 			return commonEncode(0xC7, 0, r, imm);
 		}
 		static constexpr Instruction encode(const core::reg r, const int64 imm) noexcept {
-			return Instruction(REXWR(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24), uint8(imm>>32), uint8(imm>>40), uint8(imm>>48), uint8(imm>>56));
+			return Instruction(REXWB(r), 0xB8 | uint8(r), uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24), uint8(imm>>32), uint8(imm>>40), uint8(imm>>48), uint8(imm>>56));
 		}
 		static constexpr Instruction encode(const MemT<1> m, const int8 imm) noexcept {
 			return commonEncode(0xC6, 0, m, imm);
@@ -682,15 +682,241 @@ namespace encoders {
 		}
 	};
 
+	struct test_encoder {
+		static constexpr uint8 opcode_al = 0xA8;
+		static constexpr uint8 opcode_imm = 0xF6;
+		static constexpr uint8 opcode_imm_reg = 0;
+		static constexpr uint8 opcode_reg = 0x84;
+
+		static constexpr Instruction encode(const core::reg8 rm, int8 imm) noexcept {
+			if (rm == core::reg8::al) {
+				// Special encoding for al
+				return Instruction(opcode_al, imm);
+			}
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const core::reg8_32 rm, int8 imm) noexcept {
+			if (rm == core::reg8_32::al) {
+				// Special encoding for al
+				return Instruction(opcode_al, imm);
+			}
+			// No REX needed for al, cl, dl, bl, ah, ch, dh, or bh.
+			return Instruction(opcode_imm, ModRegRm(opcode_imm_reg,rm), imm);
+		}
+		static constexpr Instruction encode(const MemT<1> rm, int8 imm) noexcept {
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const core::reg16 rm, int16 imm) noexcept {
+			if (rm == core::reg16::ax) {
+				// Special encoding for ax
+				return Instruction(memory::SIZE_PREFIX, opcode_al | 1, uint8(imm), uint8(imm>>8));
+			}
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const MemT<2> rm, int16 imm) noexcept {
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const core::reg32 rm, int32 imm) noexcept {
+			if (rm == core::reg32::eax) {
+				// Special encoding for eax
+				return Instruction(opcode_al | 1, uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
+			}
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const MemT<4> rm, int32 imm) noexcept {
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const core::reg rm, int32 imm) noexcept {
+			if (rm == core::reg::rax) {
+				// Special encoding for rax
+				return Instruction(REXW(), opcode_al | 1, uint8(imm), uint8(imm>>8), uint8(imm>>16), uint8(imm>>24));
+			}
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const MemT<8> rm, int32 imm) noexcept {
+			return commonEncode(opcode_imm, opcode_imm_reg, rm, imm);
+		}
+		static constexpr Instruction encode(const core::reg8 r, const core::reg8 rm) noexcept {
+			if (uint8(r) < 4 && uint8(rm) < 4) {
+				// No REX needed if al, cl, dl, or bl.
+				return Instruction(opcode_reg, ModRegRm(r,rm));
+			}
+			// REX is needed for spl, bpl, sil, dil,
+			// r8b, r9b, r10b, r11b, ...
+			return Instruction(REXRB(r,rm), opcode_reg, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg8_32 r, const core::reg8_32 rm) noexcept {
+			// No REX in this case (al, cl, dl, or bl, ah, ch, dh, or bh).
+			return Instruction(opcode_reg, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg8 r, const MemT<1> rm) noexcept {
+			return commonEncode(opcode_reg, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg8_32 r, const MemT<1> rm) noexcept {
+			return commonEncode(opcode_reg, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<1> rm, const core::reg8 r) noexcept {
+			// TEST is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode_reg, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<1> rm, const core::reg8_32 r) noexcept {
+			// TEST is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode_reg, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg16 r, const core::reg16 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both ax, cx, dx, bx, sp, bp, si, or di.
+				return Instruction(memory::SIZE_PREFIX, opcode_reg|1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8w, r9w, r10w, r11w, ...
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode_reg|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg16 r, const MemT<2> rm) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<2> rm, const core::reg16 r) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg32 r, const core::reg32 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both eax, ecx, edx, ebx, esp, ebp, esi, or edi.
+				return Instruction(opcode_reg|1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8d, r9d, r10d, r11d, ...
+			return Instruction(REXRB(r,rm), opcode_reg|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg32 r, const MemT<4> rm) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<4> rm, const core::reg32 r) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg r, const core::reg rm) noexcept {
+			return Instruction(REXWRB(r,rm), opcode_reg|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg r, const MemT<8> rm) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<8> rm, const core::reg r) noexcept {
+			return commonEncode(opcode_reg|1, r, rm);
+		}
+	};
+
+	struct xchg_encoder {
+		static constexpr uint8 opcode_ax_base = 0x90;
+		static constexpr uint8 opcode = 0x86;
+
+		static constexpr Instruction encode(const core::reg8 r, const core::reg8 rm) noexcept {
+			if (uint8(r) < 4 && uint8(rm) < 4) {
+				// No REX needed if al, cl, dl, or bl.
+				return Instruction(opcode, ModRegRm(r,rm));
+			}
+			// REX is needed for spl, bpl, sil, dil,
+			// r8b, r9b, r10b, r11b, ...
+			return Instruction(REXRB(r,rm), opcode, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg8_32 r, const core::reg8_32 rm) noexcept {
+			// No REX in this case (al, cl, dl, or bl, ah, ch, dh, or bh).
+			return Instruction(opcode, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg8 r, const MemT<1> rm) noexcept {
+			return commonEncode(opcode, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg8_32 r, const MemT<1> rm) noexcept {
+			return commonEncode(opcode, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<1> rm, const core::reg8 r) noexcept {
+			// XCHG is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<1> rm, const core::reg8_32 r) noexcept {
+			// XCHG is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg16 r, const core::reg16 rm) noexcept {
+			if (r == core::reg16::ax) {
+				if (uint8(rm) < 8) {
+					return Instruction(memory::SIZE_PREFIX, opcode_ax_base+uint8(rm));
+				}
+				return Instruction(memory::SIZE_PREFIX, REXB(rm), opcode_ax_base+uint8(rm));
+			}
+			if (rm == core::reg16::ax) {
+				if (uint8(r) < 8) {
+					return Instruction(memory::SIZE_PREFIX, opcode_ax_base+uint8(r));
+				}
+				return Instruction(memory::SIZE_PREFIX, REXB(r), opcode_ax_base+uint8(r));
+			}
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both ax, cx, dx, bx, sp, bp, si, or di.
+				return Instruction(memory::SIZE_PREFIX, opcode|1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8w, r9w, r10w, r11w, ...
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg16 r, const MemT<2> rm) noexcept {
+			return commonEncode(opcode|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<2> rm, const core::reg16 r) noexcept {
+			// XCHG is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode|1, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg32 r, const core::reg32 rm) noexcept {
+			if (r == core::reg32::eax) {
+				if (uint8(rm) < 8) {
+					return Instruction(opcode_ax_base+uint8(rm));
+				}
+				return Instruction(REXB(rm), opcode_ax_base+uint8(rm));
+			}
+			if (rm == core::reg32::eax) {
+				if (uint8(r) < 8) {
+					return Instruction(opcode_ax_base+uint8(r));
+				}
+				return Instruction(REXB(r), opcode_ax_base+uint8(r));
+			}
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both eax, ecx, edx, ebx, esp, ebp, esi, or edi.
+				return Instruction(opcode|1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8d, r9d, r10d, r11d, ...
+			return Instruction(REXRB(r,rm), opcode|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg32 r, const MemT<4> rm) noexcept {
+			return commonEncode(opcode|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<4> rm, const core::reg32 r) noexcept {
+			// XCHG is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode|1, r, rm);
+		}
+		static constexpr Instruction encode(const core::reg r, const core::reg rm) noexcept {
+			if (r == core::reg::rax) {
+				return Instruction(REXWB(rm), opcode_ax_base+uint8(rm));
+			}
+			if (rm == core::reg::rax) {
+				return Instruction(REXWB(r), opcode_ax_base+uint8(r));
+			}
+			return Instruction(REXWRB(r,rm), opcode|1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg r, const MemT<8> rm) noexcept {
+			return commonEncode(opcode|1, r, rm);
+		}
+		static constexpr Instruction encode(const MemT<8> rm, const core::reg r) noexcept {
+			// XCHG is commutative, so rm,r encoding is same as r,rm encoding.
+			return commonEncode(opcode|1, r, rm);
+		}
+	};
+
 	struct jmp_encoder {
+		static constexpr uint8 opcode_indirect = 0xFF;
+		static constexpr uint8 opcode_indirect_reg = 4;
+
 		static constexpr Instruction encode(const char*const target_label) noexcept {
 			return Instruction::createJump(target_label, 0xEB, 0xE9);
 		}
 		static constexpr Instruction encode(const core::reg rm) noexcept {
 			if (uint8(rm) & 0b1000) {
-				return Instruction(0xFF, ModRegRm(4,rm));
+				return Instruction(opcode_indirect, ModRegRm(opcode_indirect_reg,rm));
 			}
-			return Instruction(REXB(rm), 0xFF, ModRegRm(4,rm));
+			return Instruction(REXB(rm), opcode_indirect, ModRegRm(opcode_indirect_reg,rm));
 		}
 		static constexpr Instruction encode(MemT<8> rm) noexcept {
 			// REX byte is optional in this case, and doesn't need W set.
@@ -702,7 +928,7 @@ namespace encoders {
 
 			Instruction i = EMPTY_INSTRUCTION;
 			// REX is handled automatically, from rm.
-			i.length = OpcodeAndMem(i, 0xFF, rm, 4);
+			i.length = OpcodeAndMem(i, opcode_indirect, rm, opcode_indirect_reg);
 			return i;
 		}
 	};
@@ -852,6 +1078,8 @@ template<> struct encoder<mnemonic::XOR> : public encoders::standard_encoder<6> 
 template<> struct encoder<mnemonic::CMP> : public encoders::standard_encoder<7> {};
 template<> struct encoder<mnemonic::MOV> : public encoders::mov_encoder {};
 template<> struct encoder<mnemonic::LEA> : public encoders::lea_encoder {};
+template<> struct encoder<mnemonic::TEST> : public encoders::test_encoder {};
+template<> struct encoder<mnemonic::XCHG> : public encoders::xchg_encoder {};
 template<> struct encoder<mnemonic::JMP> : public encoders::jmp_encoder {};
 
 #define ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(MNEMONIC_PREFIX, MNEMONIC_PREFIX_LOWER) \
@@ -880,6 +1108,54 @@ ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(CMOV, cmov)
 #undef ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION
 
 namespace core {
+#define ENCODEASM_REGRM_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
+	constexpr Instruction FNAME(const reg8 destination, const reg8 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg8_32 destination, const reg8_32 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg8 destination, const MemT<1> source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg8_32 destination, const MemT<1> source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const MemT<1> destination, const reg8 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const MemT<1> destination, const reg8_32 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg16 destination, const reg16 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg16 destination, const MemT<2> source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const MemT<2> destination, const reg16 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg32 destination, const reg32 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg32 destination, const MemT<4> source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const MemT<4> destination, const reg32 source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg destination, const reg source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const reg destination, const MemT<8> source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	constexpr Instruction FNAME(const MemT<8> destination, const reg source) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
+	} \
+	// End of ENCODEASM_REGRM_ENCODING_WRAPPERS macro
+
 #define ENCODEASM_STANDARD_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
 	constexpr Instruction FNAME(const reg8 destination, const int8 source) noexcept { \
 		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
@@ -926,51 +1202,7 @@ namespace core {
 		} \
 		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
 	} \
-	constexpr Instruction FNAME(const reg8 destination, const reg8 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8_32 destination, const reg8_32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8 destination, const MemT<1> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8_32 destination, const MemT<1> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<1> destination, const reg8 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<1> destination, const reg8_32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg16 destination, const reg16 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg16 destination, const MemT<2> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<2> destination, const reg16 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg32 destination, const reg32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg32 destination, const MemT<4> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<4> destination, const reg32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg destination, const reg source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg destination, const MemT<8> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<8> destination, const reg source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(destination, source); \
-	} \
+	ENCODEASM_REGRM_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
 	// End of ENCODEASM_STANDARD_ENCODING_WRAPPERS macro
 
 	ENCODEASM_STANDARD_ENCODING_WRAPPERS(ADD, ADD)
@@ -1019,51 +1251,7 @@ namespace core {
 	constexpr Instruction FNAME(const MemT<8> destination, const int32 source) noexcept { \
 		return encoder<mnemonic::MOV>::encode(destination, source); \
 	} \
-	constexpr Instruction FNAME(const reg8 destination, const reg8 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8_32 destination, const reg8_32 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8 destination, const MemT<1> source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg8_32 destination, const MemT<1> source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<1> destination, const reg8 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<1> destination, const reg8_32 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg16 destination, const reg16 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg16 destination, const MemT<2> source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<2> destination, const reg16 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg32 destination, const reg32 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg32 destination, const MemT<4> source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<4> destination, const reg32 source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg destination, const reg source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const reg destination, const MemT<8> source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
-	constexpr Instruction FNAME(const MemT<8> destination, const reg source) noexcept { \
-		return encoder<mnemonic::MOV>::encode(destination, source); \
-	} \
+	ENCODEASM_REGRM_ENCODING_WRAPPERS(FNAME,MOV) \
 	// End of ENCODEASM_MOV_ENCODING_WRAPPERS macro
 
 	ENCODEASM_MOV_ENCODING_WRAPPERS(MOV)
@@ -1090,6 +1278,37 @@ namespace core {
 	constexpr Instruction operator%=(const core::reg destination, memory::register_scaled_register_plus source) {
 		return encoder<mnemonic::LEA>::encode(destination, Mem(source));
 	}
+
+	constexpr Instruction TEST(const core::reg8 r, const int8 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(r, imm);
+	}
+	constexpr Instruction TEST(const core::reg8_32 r, const int8 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(r, imm);
+	}
+	constexpr Instruction TEST(const core::reg16 r, const int16 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(r, imm);
+	}
+	constexpr Instruction TEST(const core::reg32 r, const int32 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(r, imm);
+	}
+	constexpr Instruction TEST(const core::reg r, const int32 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(r, imm);
+	}
+	constexpr Instruction TEST(const MemT<1> m, const int8 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(m, imm);
+	}
+	constexpr Instruction TEST(const MemT<2> m, const int16 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(m, imm);
+	}
+	constexpr Instruction TEST(const MemT<4> m, const int32 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(m, imm);
+	}
+	constexpr Instruction TEST(const MemT<8> m, const int32 imm) noexcept {
+		return encoder<mnemonic::TEST>::encode(m, imm);
+	}
+	ENCODEASM_REGRM_ENCODING_WRAPPERS(TEST,TEST)
+
+	ENCODEASM_REGRM_ENCODING_WRAPPERS(XCHG,XCHG)
 
 	constexpr Instruction JMP(const char*const target_label) noexcept {
 		return encoder<mnemonic::JMP>::encode(target_label);
