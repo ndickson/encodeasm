@@ -106,6 +106,8 @@ enum class mnemonic : uint32 {
 	INC,
 	DEC,
 
+	BSF,
+	BSR,
 	BT,
 	BTS,
 	BTR,
@@ -1306,6 +1308,60 @@ namespace encoders {
 		}
 	};
 
+	template<bool reverse>
+	struct bscan_encoder {
+		static constexpr uint8 opcode0 = 0x0F;
+		static constexpr uint8 opcode1 = 0xBC + uint8(reverse);
+
+		static constexpr Instruction encode(const core::reg16 r, const core::reg16 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both ax, cx, dx, bx, sp, bp, si, or di.
+				return Instruction(memory::SIZE_PREFIX, opcode0, opcode1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8w, r9w, r10w, r11w, ...
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode0, opcode1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg16 r, const MemT<2> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			i.bytes[0] = memory::SIZE_PREFIX;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r, 1);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg32 r, const core::reg32 rm) noexcept {
+			if (uint8(r) < 8 && uint8(rm) < 8) {
+				// No REX needed if both eax, ecx, edx, ebx, esp, ebp, esi, or edi.
+				return Instruction(opcode0, opcode1, ModRegRm(r,rm));
+			}
+			// REX is needed for r8d, r9d, r10d, r11d, ...
+			return Instruction(REXRB(r,rm), opcode0, opcode1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg32 r, const MemT<4> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg r, const core::reg rm) noexcept {
+			return Instruction(REXWRB(r,rm), opcode0, opcode1, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const core::reg r, const MemT<8> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, including W from rm.
+			i.length = OpcodeAndMem(i, opcode0, opcode1, rm, r);
+			return i;
+		}
+	};
+
 	template<uint8 num>
 	struct btest_encoder {
 		static constexpr uint8 opcode0 = 0x0F;
@@ -1664,6 +1720,8 @@ template<> struct encoder<mnemonic::DIV> : public encoders::standard_unary_encod
 template<> struct encoder<mnemonic::IDIV> : public encoders::standard_unary_encoder<0xF6,7> {};
 template<> struct encoder<mnemonic::INC> : public encoders::standard_unary_encoder<0xFE,0> {};
 template<> struct encoder<mnemonic::DEC> : public encoders::standard_unary_encoder<0xFE,1> {};
+template<> struct encoder<mnemonic::BSF> : public encoders::bscan_encoder<false> {};
+template<> struct encoder<mnemonic::BSR> : public encoders::bscan_encoder<true> {};
 template<> struct encoder<mnemonic::BT> : public encoders::btest_encoder<0> {};
 template<> struct encoder<mnemonic::BTS> : public encoders::btest_encoder<1> {};
 template<> struct encoder<mnemonic::BTR> : public encoders::btest_encoder<2> {};
@@ -2074,6 +2132,19 @@ namespace core {
 	ENCODEASM_RMREG_ENCODING_WRAPPERS(XADD,XADD)
 	ENCODEASM_RMREG_ENCODING_WRAPPERS(CMPXCHG,CMPXCHG)
 #undef ENCODEASM_RMREG_ENCODING_WRAPPERS
+
+#define ENCODEASM_BSCAN_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg16,reg16) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg16,MemT<2>) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg32,reg32) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg32,MemT<4>) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg,reg) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg,MemT<8>) \
+	// End of ENCODEASM_BSCAN_ENCODING_WRAPPERS macro
+
+	ENCODEASM_BSCAN_ENCODING_WRAPPERS(BSF,BSF)
+	ENCODEASM_BSCAN_ENCODING_WRAPPERS(BSR,BSR)
+#undef ENCODEASM_BSCAN_ENCODING_WRAPPERS
 
 #define ENCODEASM_BTEST_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
 	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg16,reg16) \
