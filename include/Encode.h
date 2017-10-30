@@ -108,6 +108,7 @@ enum class mnemonic : uint32 {
 
 	BSF,
 	BSR,
+	BSWAP,
 	BT,
 	BTS,
 	BTR,
@@ -125,6 +126,7 @@ enum class mnemonic : uint32 {
 	CMPXCHG8B,
 	CMPXCHG16B,
 	CPUID,
+	JRCXZ,
 	MOVSB,
 	MOVSW,
 	MOVSD,
@@ -1362,6 +1364,22 @@ namespace encoders {
 		}
 	};
 
+	struct bswap_encoder {
+		static constexpr uint8 opcode0 = 0x0F;
+		static constexpr uint8 opcode1_base = 0xC8;
+
+		static constexpr Instruction encode(const core::reg32 r) noexcept {
+			if (uint8(r) < 8) {
+				// No REX needed if both eax, ecx, edx, ebx, esp, ebp, esi, or edi.
+				return Instruction(opcode0, opcode1_base | uint8(r));
+			}
+			return Instruction(REXB(r), opcode0, opcode1_base | (uint8(r)&0b111));
+		}
+		static constexpr Instruction encode(const core::reg r) noexcept {
+			return Instruction(REXWB(r), opcode0, opcode1_base | (uint8(r)&0b111));
+		}
+	};
+
 	template<uint8 num>
 	struct btest_encoder {
 		static constexpr uint8 opcode0 = 0x0F;
@@ -1527,6 +1545,44 @@ namespace encoders {
 		}
 	};
 
+	struct call_encoder {
+		static constexpr uint8 opcode_direct = 0xE8;
+		static constexpr uint8 opcode_indirect = 0xFF;
+		static constexpr uint8 opcode_indirect_reg = 2;
+
+		static constexpr Instruction encode(const void *const function_address) noexcept {
+			return Instruction::createCallToAddress(function_address, opcode_direct);
+		}
+		static constexpr Instruction encode(const char *const target_label) noexcept {
+			return Instruction::createCallToLabel(target_label, opcode_direct);
+		}
+		static constexpr Instruction encode(const core::reg rm) noexcept {
+			// No REX W bit, since always 64-bit.
+			if (uint8(rm) < 8) {
+				return Instruction(opcode_indirect, ModRegRm(opcode_indirect_reg,rm));
+			}
+			return Instruction(REXB(rm), opcode_indirect, ModRegRm(opcode_indirect_reg,rm));
+		}
+		static constexpr Instruction encode(MemT<8> rm) noexcept {
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+
+			if (rm.hasrex) {
+				// Remove W bit, since always 64-bit.
+				rm.rex &= ~0b1000;
+				if (!(rm.rex & 0b0111)) {
+					rm.hasrex = false;
+				}
+			}
+
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode_indirect, rm, opcode_indirect_reg);
+			return i;
+		}
+	};
+
 	template<uint8 main_opcode>
 	struct ret_encoder {
 		static constexpr Instruction encode() noexcept {
@@ -1611,6 +1667,23 @@ namespace encoders {
 		}
 		static constexpr Instruction encodeUnlikely(const char*const target_label) noexcept {
 			return Instruction::createJump(target_label, short_opcode, 0x0F, near_opcode, 0x2E);
+		}
+	};
+
+	struct jrcxz_encoder {
+		static constexpr uint8 opcode = 0xE3;
+
+		static constexpr Instruction encode(const char*const target_label) noexcept {
+			// NOTE: JRCXZ only support short jumps.
+			return Instruction(Instruction::jump_short_init_tag(),target_label, opcode);
+		}
+		static constexpr Instruction encodeLikely(const char*const target_label) noexcept {
+			// NOTE: JRCXZ only support short jumps.
+			return Instruction(Instruction::jump_short_init_tag(),target_label, opcode, 0x3E);
+		}
+		static constexpr Instruction encodeUnlikely(const char*const target_label) noexcept {
+			// NOTE: JRCXZ only support short jumps.
+			return Instruction(Instruction::jump_short_init_tag(),target_label, opcode, 0x2E);
 		}
 	};
 
@@ -1722,6 +1795,7 @@ template<> struct encoder<mnemonic::INC> : public encoders::standard_unary_encod
 template<> struct encoder<mnemonic::DEC> : public encoders::standard_unary_encoder<0xFE,1> {};
 template<> struct encoder<mnemonic::BSF> : public encoders::bscan_encoder<false> {};
 template<> struct encoder<mnemonic::BSR> : public encoders::bscan_encoder<true> {};
+template<> struct encoder<mnemonic::BSWAP> : public encoders::bswap_encoder {};
 template<> struct encoder<mnemonic::BT> : public encoders::btest_encoder<0> {};
 template<> struct encoder<mnemonic::BTS> : public encoders::btest_encoder<1> {};
 template<> struct encoder<mnemonic::BTR> : public encoders::btest_encoder<2> {};
@@ -1739,6 +1813,7 @@ template<> struct encoder<mnemonic::CMPXCHG> : public encoders::memreg_encoder<0
 template<> struct encoder<mnemonic::CMPXCHG8B> : public encoders::cmpxchg8b_encoder {};
 template<> struct encoder<mnemonic::CMPXCHG16B> : public encoders::cmpxchg16b_encoder {};
 template<> struct encoder<mnemonic::CPUID> : public encoders::none_encoder2<0x0F,0xA2> {};
+template<> struct encoder<mnemonic::JRCXZ> : public encoders::jrcxz_encoder {};
 template<> struct encoder<mnemonic::MOVSB> : public encoders::none_encoder<0xA4> {};
 template<> struct encoder<mnemonic::MOVSW> : public encoders::none_encoder2<memory::SIZE_PREFIX,0xA5> {};
 template<> struct encoder<mnemonic::MOVSD> : public encoders::none_encoder<0xA5> {};
@@ -1765,6 +1840,7 @@ template<> struct encoder<mnemonic::REP_STOSQ> : public encoders::none_encoder3<
 template<> struct encoder<mnemonic::UD2> : public encoders::none_encoder2<0x0F,0x0B> {};
 template<> struct encoder<mnemonic::XADD> : public encoders::memreg_encoder<0xC0> {};
 template<> struct encoder<mnemonic::JMP> : public encoders::jmp_encoder {};
+template<> struct encoder<mnemonic::CALL> : public encoders::call_encoder {};
 template<> struct encoder<mnemonic::RET> : public encoders::ret_encoder<0xC3> {};
 
 #define ENCODEASM_CONDITIONAL_ENCODER_SPECIALIZATION(MNEMONIC_PREFIX, MNEMONIC_PREFIX_LOWER) \
@@ -1980,6 +2056,7 @@ namespace core {
 	// End of ENCODEASM_JCC_ENCODING_WRAPPER macro
 
 	ENCODEASM_CONDITIONAL_ENCODING_WRAPPERS(ENCODEASM_JCC_ENCODING_WRAPPERS)
+	ENCODEASM_JCC_ENCODING_WRAPPERS(RCXZ)
 #undef ENCODEASM_JCC_ENCODING_WRAPPERS
 
 #define ENCODEASM_SETCC_ENCODING_WRAPPERS(CONDITION) \
@@ -2005,33 +2082,15 @@ namespace core {
 #undef ENCODEASM_CONDITIONAL_ENCODING_WRAPPERS
 
 #define ENCODEASM_STANDARD_UNARY_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
-	constexpr Instruction FNAME(const reg8 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const reg8_32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const MemT<1> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const reg16 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const MemT<2> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const reg32 source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const MemT<4> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const reg source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
-	constexpr Instruction FNAME(const MemT<8> source) noexcept { \
-		return encoder<mnemonic::MNEMONIC>::encode(source); \
-	} \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,reg8_32) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,MemT<1>) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,reg16) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,MemT<2>) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,reg32) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,MemT<4>) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,reg) \
+	ENCODEASM_FUNCTION_WRAPPER_SRC(FNAME,MNEMONIC,MemT<8>) \
 	// End of ENCODEASM_STANDARD_UNARY_ENCODING_WRAPPERS macro
 
 	ENCODEASM_STANDARD_UNARY_ENCODING_WRAPPERS(NOT,NOT)
@@ -2108,6 +2167,15 @@ namespace core {
 	ENCODEASM_FUNCTION_WRAPPER_NONE(REP_STOSQ,REP_STOSQ)
 	ENCODEASM_FUNCTION_WRAPPER_NONE(UD2,UD2)
 
+	constexpr Instruction CALL(const void *const function_address) noexcept {
+		return encoder<mnemonic::CALL>::encode(function_address);
+	}
+	constexpr Instruction CALL(const char *const target_label) noexcept {
+		return encoder<mnemonic::CALL>::encode(target_label);
+	}
+	ENCODEASM_FUNCTION_WRAPPER_SRC(CALL,CALL,reg)
+	ENCODEASM_FUNCTION_WRAPPER_SRC(CALL,CALL,MemT<8>)
+
 	ENCODEASM_FUNCTION_WRAPPER_NONE(RET,RET)
 
 	/// NOTE: You probably don't want to call this version.
@@ -2145,6 +2213,9 @@ namespace core {
 	ENCODEASM_BSCAN_ENCODING_WRAPPERS(BSF,BSF)
 	ENCODEASM_BSCAN_ENCODING_WRAPPERS(BSR,BSR)
 #undef ENCODEASM_BSCAN_ENCODING_WRAPPERS
+
+	ENCODEASM_FUNCTION_WRAPPER_DST(BSWAP,BSWAP,reg32)
+	ENCODEASM_FUNCTION_WRAPPER_DST(BSWAP,BSWAP,reg)
 
 #define ENCODEASM_BTEST_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
 	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg16,reg16) \
