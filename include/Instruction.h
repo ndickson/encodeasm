@@ -21,16 +21,47 @@ struct alignas(16) Instruction {
 	/// 15 is also chosen here so that sizeof(Instruction)==16.
 	static constexpr uint8 MAX_LENGTH = 15;
 
-	/// First byte is length of instruction in the rest of the bytes.
 	union {
 		struct {
+			/// The first byte is usually the length of the instruction in the rest of the bytes.
+			/// If it's larger than MAX_LENGTH, it must be one of the special values below:
+			/// ALIGN_LENGTH, JUMP_LENGTH, JUMP_SHORT_LENGTH, JUMP_NEAR_LENGTH,
+			/// LINE_LABEL_LENGTH, ERROR_LENGTH.
 			uint8 length;
+			/// If length is <= MAX_LENGTH, this holds the instruction encoding.
 			uint8 bytes[MAX_LENGTH];
 		};
 		struct {
-			uint8 padding[1+MAX_LENGTH-sizeof(const char*)];
-			const char *text;
-		} textEncoding;
+			/// This is just to get text to line up correctly.
+			uint8 padding_text[1+MAX_LENGTH-sizeof(const char*)];
+
+			/// If length is CALL_LABEL_LENGTH, JUMP_LENGTH, JUMP_SHORT_LENGTH, JUMP_NEAR_LENGTH,
+			/// LINE_LABEL_LENGTH, or ERROR_LENGTH, this is a pointer to a text string.
+			/// This overlaps the last few bytes of "bytes", and is here so that
+			/// there's a way to write a string literal pointer into the Instruction
+			/// in constexpr code.
+			const char* text;
+		} textEncoding; // This just had to be named because the Visual C++ compiler crashed without a name.
+		struct {
+			/// This is just to get address to line up correctly.
+			uint8 padding_address[1+MAX_LENGTH-sizeof(const void*)];
+
+			/// If length is CALL_ADDRESS_LENGTH, this is a pointer to a function.
+			/// This overlaps the last few bytes of "bytes", and is here so that
+			/// there's a way to write a function pointer into the Instruction
+			/// in constexpr code.
+			const void* address;
+		} addressEncoding; // This just had to be named because the Visual C++ compiler crashed without a name.
+		struct {
+			/// This is just to get index to line up correctly.
+			uint8 padding_index[1+MAX_LENGTH-sizeof(uint64)];
+
+			/// If length is CALL_LABEL_LENGTH, JUMP_LENGTH, JUMP_SHORT_LENGTH,
+			/// or JUMP_NEAR_LENGTH, and the first part of jump resolution has been done,
+			/// this is the Instruction index of the line label.
+			/// This overlaps "text", since they're mutually exclusive.
+			uint64 index;
+		} indexEncoding; // This just had to be named because the Visual C++ compiler crashed without a name.
 	};
 
 	/// Default constructor must be trivial for Instruction to be a POD type,
@@ -59,6 +90,8 @@ struct alignas(16) Instruction {
 
 	struct zero_init_tag { constexpr zero_init_tag() = default; };
 	struct align_init_tag { constexpr align_init_tag() = default; };
+	struct call_addr_init_tag { constexpr call_addr_init_tag() = default; };
+	struct call_label_init_tag { constexpr call_label_init_tag() = default; };
 	struct jump_init_tag { constexpr jump_init_tag() = default; };
 	struct jump_short_init_tag { constexpr jump_short_init_tag() = default; };
 	struct jump_near_init_tag { constexpr jump_near_init_tag() = default; };
@@ -82,7 +115,17 @@ struct alignas(16) Instruction {
 	/// bytes[0] is the exponent of the power of 2 to which this
 	/// should align the following code, e.g. 0 for 1-byte alignment (none),
 	/// 4 for 16-byte alignment.
-	static constexpr uint8 ALIGN_LENGTH = 0xFA;
+	static constexpr uint8 ALIGN_LENGTH = 0xF8;
+
+	/// If length is equal to this, this an call instruction to call
+	/// a specified address.
+	/// A pointer to the function is aligned to the end of bytes.
+	static constexpr uint8 CALL_ADDRESS_LENGTH = 0xF9;
+
+	/// If length is equal to this, this an call instruction to call
+	/// a line label in the current Instruction sequence being encoded.
+	/// A pointer to the call target label name is aligned to the end of bytes.
+	static constexpr uint8 CALL_LABEL_LENGTH = 0xFA;
 
 	/// If length is equal to this, this an unresolved jump instruction
 	/// that might be a short jump (2 bytes) or a near jump (5-7 bytes for
@@ -145,6 +188,24 @@ public:
 
 	static constexpr Instruction createLineLabel(const char*const label) noexcept {
 		return Instruction(line_label_init_tag(), label);
+	}
+
+	constexpr Instruction(call_addr_init_tag, const void *const function_address, const uint8 opcode) noexcept :
+		length(CALL_ADDRESS_LENGTH), bytes{opcode} {
+		addressEncoding.address = function_address;
+	}
+
+	static constexpr Instruction createCallToAddress(const void *const function_address, const uint8 opcode) noexcept {
+		return Instruction(call_addr_init_tag(), function_address, opcode);
+	}
+
+	constexpr Instruction(call_label_init_tag, const char*const target_label, const uint8 opcode) noexcept :
+		length(CALL_LABEL_LENGTH), bytes{opcode} {
+		setStringPtr(target_label);
+	}
+
+	static constexpr Instruction createCallToLabel(const char*const target_label, const uint8 opcode) noexcept {
+		return Instruction(call_label_init_tag(), target_label, opcode);
 	}
 
 	constexpr Instruction(jump_init_tag, const char*const target_label, const uint8 short_opcode, const uint8 near_opcode0, const uint8 near_opcode1=0, const uint8 prefix=0) noexcept :
