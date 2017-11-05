@@ -149,6 +149,8 @@ enum class mnemonic : uint32 {
 	SAR,
 	SHL,
 	SHR,
+	SHLD,
+	SHRD,
 	STOSB,
 	STOSW,
 	STOSD,
@@ -1846,6 +1848,154 @@ namespace encoders {
 		}
 	};
 
+	template<uint8 opcode1_imm>
+	struct shiftd_encoder {
+		static constexpr uint8 opcode0 = 0x0F;
+		static constexpr uint8 opcode1_cl = opcode1_imm+1;
+
+		private:
+		/// NOTE: This is intentionally *not* constexpr, to produce a compile
+		///       error if hit at compile time.
+		static Instruction error_shift_bit_count_must_be_less_than_register_size() noexcept {
+			return Instruction::createError("The shift count for double register bit shift instructions must be strictly less than the number of bits in a single register.");
+		}
+		/// NOTE: This is intentionally *not* constexpr, to produce a compile
+		///       error if hit at compile time.
+		static Instruction error_shift_bit_count_register_must_be_cl() noexcept {
+			return Instruction::createError("The only register that can be used for a bit shift count is cl.");
+		}
+		public:
+
+		static constexpr Instruction encode(const core::reg16 rm, const core::reg16 r, const uint8 imm) noexcept {
+			if (imm >= 16) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			if (uint8(rm) < 8 && uint8(r) < 8) {
+				return Instruction(memory::SIZE_PREFIX, opcode0, opcode1_imm, ModRegRm(r,rm), imm);
+			}
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode0, opcode1_imm, ModRegRm(r,rm), imm);
+		}
+		static constexpr Instruction encode(const MemT<2> rm, const core::reg16 r, const uint8 imm) noexcept {
+			if (imm >= 16) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			i.bytes[0] = memory::SIZE_PREFIX;
+			// REX is handled automatically, if needed.
+			int index = OpcodeAndMem(i, opcode0, opcode1_imm, rm, r, 1);
+			i.bytes[index] = imm;
+			i.length = index+1;
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg16 rm, const core::reg16 r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			if (uint8(rm) < 8 && uint8(r) < 8) {
+				return Instruction(memory::SIZE_PREFIX, opcode0, opcode1_cl, ModRegRm(r,rm));
+			}
+			return Instruction(memory::SIZE_PREFIX, REXRB(r,rm), opcode0, opcode1_cl, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const MemT<2> rm, const core::reg16 r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			i.bytes[0] = memory::SIZE_PREFIX;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1_cl, rm, r, 1);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg32 rm, const core::reg32 r, const uint8 imm) noexcept {
+			if (imm >= 32) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			if (uint8(rm) < 8 && uint8(r) < 8) {
+				return Instruction(opcode0, opcode1_imm, ModRegRm(r,rm), imm);
+			}
+			return Instruction(REXRB(r,rm), opcode0, opcode1_imm, ModRegRm(r,rm), imm);
+		}
+		static constexpr Instruction encode(const MemT<4> rm, const core::reg32 r, const uint8 imm) noexcept {
+			if (imm >= 32) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, if needed.
+			int index = OpcodeAndMem(i, opcode0, opcode1_imm, rm, r);
+			i.bytes[index] = imm;
+			i.length = index+1;
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg32 rm, const core::reg32 r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			if (uint8(rm) < 8 && uint8(r) < 8) {
+				return Instruction(opcode0, opcode1_cl, ModRegRm(r,rm));
+			}
+			return Instruction(REXRB(r,rm), opcode0, opcode1_cl, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const MemT<4> rm, const core::reg32 r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, if needed.
+			i.length = OpcodeAndMem(i, opcode0, opcode1_cl, rm, r);
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg rm, const core::reg r, const uint8 imm) noexcept {
+			if (imm >= 64) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			return Instruction(REXWRB(r,rm), opcode0, opcode1_imm, ModRegRm(r,rm), imm);
+		}
+		static constexpr Instruction encode(const MemT<8> rm, const core::reg r, const uint8 imm) noexcept {
+			if (imm >= 64) {
+				return error_shift_bit_count_must_be_less_than_register_size();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, including W from rm.
+			int index = OpcodeAndMem(i, opcode0, opcode1_imm, rm, r);
+			i.bytes[index] = imm;
+			i.length = index+1;
+			return i;
+		}
+		static constexpr Instruction encode(const core::reg rm, const core::reg r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			return Instruction(REXWRB(r,rm), opcode0, opcode1_cl, ModRegRm(r,rm));
+		}
+		static constexpr Instruction encode(const MemT<8> rm, const core::reg r, const core::reg8 s) noexcept {
+			if (s != core::reg8::cl) {
+				return error_shift_bit_count_register_must_be_cl();
+			}
+			if (rm.hasError()) {
+				return Instruction::createError("Invalid memory operand");
+			}
+			Instruction i = EMPTY_INSTRUCTION;
+			// REX is handled automatically, including W from rm.
+			i.length = OpcodeAndMem(i, opcode0, opcode1_cl, rm, r);
+			return i;
+		}
+	};
+
 	template<uint8 opcode>
 	struct none_encoder {
 		static constexpr Instruction encode() noexcept {
@@ -2154,6 +2304,8 @@ template<> struct encoder<mnemonic::RCR> : public encoders::shift_encoder<3> {};
 template<> struct encoder<mnemonic::SHL> : public encoders::shift_encoder<4> {};
 template<> struct encoder<mnemonic::SHR> : public encoders::shift_encoder<5> {};
 template<> struct encoder<mnemonic::SAR> : public encoders::shift_encoder<7> {};
+template<> struct encoder<mnemonic::SHLD> : public encoders::shiftd_encoder<0xA4> {};
+template<> struct encoder<mnemonic::SHRD> : public encoders::shiftd_encoder<0xAC> {};
 template<> struct encoder<mnemonic::RDPMC> : public encoders::none_encoder2<0x0F,0x33> {};
 template<> struct encoder<mnemonic::RDTSC> : public encoders::none_encoder2<0x0F,0x31> {};
 template<> struct encoder<mnemonic::STOSB> : public encoders::none_encoder<0xAA> {};
@@ -2216,6 +2368,11 @@ namespace core {
 		return encoder<mnemonic::MNEMONIC>::encode(destination); \
 	} \
 	// End of ENCODEASM_FUNCTION_WRAPPER_DST macro
+#define ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,DST_TYPE,SRC0_TYPE,SRC1_TYPE) \
+	constexpr Instruction FNAME(const DST_TYPE destination, const SRC0_TYPE source0, const SRC1_TYPE source1) noexcept { \
+		return encoder<mnemonic::MNEMONIC>::encode(destination, source0, source1); \
+	} \
+	// End of ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC macro
 
 #define ENCODEASM_REGRM_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
 	ENCODEASM_FUNCTION_WRAPPER_DST_SRC(FNAME,MNEMONIC,reg8,reg8) \
@@ -2603,10 +2760,30 @@ namespace core {
 	ENCODEASM_SHIFT_ENCODING_WRAPPERS(SAR,SAR)
 #undef ENCODEASM_SHIFT_ENCODING_WRAPPERS
 
+#define ENCODEASM_SHIFTD_ENCODING_WRAPPERS(FNAME,MNEMONIC) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg16,reg16,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<2>,reg16,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg16,reg16,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<2>,reg16,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg32,reg32,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<4>,reg32,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg32,reg32,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<4>,reg32,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg,reg,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<8>,reg,uint8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,reg,reg,reg8) \
+	ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC(FNAME,MNEMONIC,MemT<8>,reg,reg8) \
+	// End of ENCODEASM_SHIFTD_ENCODING_WRAPPERS macro
+
+	ENCODEASM_SHIFTD_ENCODING_WRAPPERS(SHLD,SHLD)
+	ENCODEASM_SHIFTD_ENCODING_WRAPPERS(SHRD,SHRD)
+#undef ENCODEASM_SHIFTD_ENCODING_WRAPPERS
+
 #undef ENCODEASM_FUNCTION_WRAPPER_NONE
 #undef ENCODEASM_FUNCTION_WRAPPER_DST_SRC
 #undef ENCODEASM_FUNCTION_WRAPPER_SRC
 #undef ENCODEASM_FUNCTION_WRAPPER_DST
+#undef ENCODEASM_FUNCTION_WRAPPER_DST_SRC_SRC
 #undef ENCODEASM_FUNCTION_WRAPPER_DST_IMM_CHECK
 } // namespace core
 
